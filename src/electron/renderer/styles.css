@@ -78,6 +78,7 @@ input, textarea, [contenteditable="true"] {
   -webkit-user-select: text;
 }
 .shell {
+  -webkit-app-region: drag;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -93,6 +94,15 @@ input, textarea, [contenteditable="true"] {
   box-shadow: 0 22px 55px var(--shadow);
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
+}
+.total-panel,
+.footer { -webkit-app-region: drag; }
+/* Keep the total and unused window background available for moving the widget.
+   Content panels need pointer and wheel events, including their empty space. */
+.shell > :not(.titlebar, .total-panel, .footer),
+.shell :is(button, input, select, textarea, a, [role="button"], [role="menu"], [popover]),
+.footer > * {
+  -webkit-app-region: no-drag;
 }
 /* The image is its own layer over the glass, never a replacement for it: the
    shell keeps its glass (or the native material below it) and the image's
@@ -285,7 +295,8 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   min-height: 30px;
 }
 .titlebar.period-menu-open { z-index: 13; }
-.shell.desktop-mode .titlebar { -webkit-app-region: no-drag; }
+.shell.desktop-mode,
+.shell.desktop-mode :is(.titlebar, .total-panel, .footer) { -webkit-app-region: no-drag; }
 .titlebar > div:first-child { min-width: 0; flex: 1 1 auto; }
 .app-title {
   display: flex;
@@ -6899,10 +6910,12 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   font-size: 0.6875rem;
 }
 
-.trends-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; overflow: hidden; }
+/* Keep the plot readable at small window heights or larger zoom levels. The
+   summary cards may scroll beneath the fixed header and footer. */
+.trends-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; overflow: hidden auto; }
 .trends-cap { flex: none; display: flex; align-items: center; justify-content: space-between; font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.6; }
 .trends-open-hint { opacity: 0.75; cursor: pointer; font-size: 0.8125rem; }
-.trends-spark { flex: 1 1 auto; min-height: 0; display: flex; cursor: pointer; border-radius: 8px; padding: 6px 4px; transition: background 0.12s ease; }
+.trends-spark { flex: 1 0 80px; min-height: 80px; display: flex; cursor: pointer; border-radius: 8px; padding: 6px 4px; transition: background 0.12s ease; }
 .trends-spark:hover { background: rgba(var(--overlay-rgb), 0.05); }
 .trends-spark .sparkline { width: 100%; height: 100%; display: block; }
 .trends-spark .spark-bar {
