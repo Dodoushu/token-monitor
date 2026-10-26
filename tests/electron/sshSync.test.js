@@ -87,7 +87,9 @@ test('SSH interval defaults to five minutes and clamps to 15 seconds through one
   assert.equal(normalizeSshIntervalMs(45000), 45000);
 });
 
-test('password askpass contains no secret on disk and removes its private directory', async () => {
+test('password askpass contains no secret on disk and removes its private directory', {
+  skip: process.platform === 'win32' ? 'password authentication requires a POSIX executable shell and permissions' : false
+}, async () => {
   const helper = createSshAskpass('never-write-me', { platform: 'linux' });
   const folder = path.dirname(helper.path);
   try {

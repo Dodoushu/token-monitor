@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const { collectSshMirror, scanEnvironment } = require('../../src/electron/sshLocalCollector');
 
 test('remote mirrors are scanned locally with explicit home, a fixed client filter and no inherited source overrides', async () => {
@@ -41,8 +42,8 @@ test('an empty supported-source set never expands into all local clients', async
 test('the mirror environment excludes local provider credentials and absolute scanner overrides', () => {
   const env = scanEnvironment('/mirror', { PATH: '/bin', CODEX_HOME: '/real/codex', TOKSCALE_EXTRA_DIRS: 'codex:/real', TOKEN: 'secret', XDG_DATA_HOME: '/real/data' });
   assert.equal(env.PATH, '/bin');
-  assert.equal(env.CODEX_HOME, '/mirror/.codex');
-  assert.equal(env.XDG_DATA_HOME, '/mirror/.local/share');
+  assert.equal(env.CODEX_HOME, path.join('/mirror', '.codex'));
+  assert.equal(env.XDG_DATA_HOME, path.join('/mirror', '.local', 'share'));
   assert.equal(Object.hasOwn(env, 'TOKEN'), false);
   assert.equal(Object.hasOwn(env, 'TOKSCALE_EXTRA_DIRS'), false);
 });
@@ -60,7 +61,7 @@ test('valid JSON with the wrong report shape cannot replace a previous observati
 });
 
 test('a scan crossing the local day boundary is rejected instead of publishing mismatched period windows', async () => {
-  const times = [new Date('2026-10-26T23:59:59+08:00'), new Date('2026-10-27T00:00:01+08:00')];
+  const times = [new Date(2026, 9, 26, 23, 59, 59), new Date(2026, 9, 27, 0, 0, 1)];
   await assert.rejects(collectSshMirror({ home: '/mirror', connection: { id: 'dev' }, clients: ['codex'] }, {
     resolveBinary: () => '/scanner', now: () => times.shift(),
     runJson: async (_binary, args) => args.includes('graph') ? { contributions: [] } : { entries: [] }

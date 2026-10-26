@@ -63,8 +63,10 @@ test('streamed tar and gzip archives create only private regular files and disco
     ], compressed));
     const directory = mirror.home;
     try {
-      assert.equal(fs.statSync(directory).mode & 0o777, 0o700);
-      assert.equal(fs.statSync(path.join(directory, '.codex/sessions/a.jsonl')).mode & 0o777, 0o600);
+      if (process.platform !== 'win32') {
+        assert.equal(fs.statSync(directory).mode & 0o777, 0o700);
+        assert.equal(fs.statSync(path.join(directory, '.codex/sessions/a.jsonl')).mode & 0o777, 0o600);
+      }
       assert.equal(fs.readFileSync(path.join(directory, '.codex/sessions/a.jsonl'), 'utf8'), 'codex-data');
       assert.equal(mirror.result().files, 2);
       assert.equal(mirror.result().remotePlatform, 'linux');
@@ -132,7 +134,9 @@ test('sequential tar batches are consumed without losing files after end markers
   } finally { mirror.cleanup(); }
 });
 
-test('remote shell command archives only whitelisted session files without Node or project dependencies', async () => {
+test('remote shell command archives only whitelisted session files without Node or project dependencies', {
+  skip: process.platform === 'win32' ? 'requires local POSIX shell and file tools to emulate the remote host' : false
+}, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-remote-home-'));
   const remoteHome = path.join(root, "home'a;$(touch injected)");
   fs.mkdirSync(path.join(remoteHome, '.codex/sessions'), { recursive: true });
@@ -156,7 +160,9 @@ test('remote shell command archives only whitelisted session files without Node 
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('remote source roots refuse symlink ancestors and uncompressed fallback needs no gzip', async () => {
+test('remote source roots refuse symlink ancestors and uncompressed fallback needs no gzip', {
+  skip: process.platform === 'win32' ? 'requires local POSIX shell, file tools and symlinks to emulate the remote host' : false
+}, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-remote-links-'));
   const home = path.join(root, 'home');
   const outside = path.join(root, 'outside');
