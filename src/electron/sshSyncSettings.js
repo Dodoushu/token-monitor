@@ -16,6 +16,8 @@ function sameEndpoint(a, b) {
 // canonical credential store. No read API returns a credential to the renderer.
 function createSshSyncSettings({ getSettings, store, commitConnections, normalize, collect }) {
   let testController = null;
+  let testFatal = null;
+  function assertAvailable() { if (testFatal) throw testFatal; }
   function saved() { return getSettings().sshConnections || []; }
   function password(id) {
     validId(id);
@@ -59,7 +61,7 @@ function createSshSyncSettings({ getSettings, store, commitConnections, normaliz
     const list = saved().filter((row) => row.id !== next.connection.id);
     if (list.length >= 20) throw new Error('At most 20 SSH connections are supported');
     const duplicate = list.some((row) => row.authMode === next.connection.authMode
-      && row.remotePath === next.connection.remotePath
+      && row.remoteHome === next.connection.remoteHome
       && (row.authMode === 'alias' ? row.alias === next.connection.alias : sameEndpoint(row, next.connection)));
     if (duplicate) throw new Error('This SSH target is already configured');
     list.push(next.connection);
@@ -74,15 +76,19 @@ function createSshSyncSettings({ getSettings, store, commitConnections, normaliz
     commit(saved().filter((row) => row.id !== id), (credentials) => { delete credentials[id]; });
   }
   async function test(options) {
+    assertAvailable();
     if (testController) throw new Error('An SSH connection test is already running');
     const next = draft(options);
     testController = new AbortController();
     try {
       const result = await collect(next.connection, { password: next.password, timeoutMs: 180000, signal: testController.signal });
       return { ok: true, deviceId: String(result.deviceId || '') };
+    } catch (error) {
+      if (error.code === 'termination-unconfirmed') testFatal = error;
+      throw error;
     } finally { testController = null; }
   }
-  return { connections, password, save, remove, test, cancelTest: () => testController?.abort() };
+  return { connections, password, save, remove, test, assertAvailable, cancelTest: () => testController?.abort() };
 }
 
 module.exports = { createSshSyncSettings };

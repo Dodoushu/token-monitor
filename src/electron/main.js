@@ -3131,6 +3131,7 @@ async function startSshCollector() {
   const generation = hubModeGeneration;
   await stopSshRuntime();
   if (generation !== hubModeGeneration || settings.hubMode !== 'ssh') return;
+  getSshSettingsService().assertAvailable();
   startLocalCollector();
   mode = 'sync';
   const current = () => generation === hubModeGeneration && settings.hubMode === 'ssh';
@@ -7993,9 +7994,19 @@ app.whenReady().then(() => {
   ipcMain.handle('sshSync:removeConnection', (_event, id) => editSshConnections(() => sshCommands.remove(id)));
   let sshTestInFlight = null;
   ipcMain.handle('sshSync:testConnection', async (_event, options) => {
-    if (sshTestInFlight) throw new Error('An SSH connection test is already running');
+    if (sshStopError || sshStatus().error === 'termination-unconfirmed') return { ok: false, errorCode: 'ssh-failed' };
+    if (sshTestInFlight) return { ok: false, errorCode: 'ssh-test-busy' };
     sshTestInFlight = sshCommands.test(options);
     try { return await sshTestInFlight; }
+    catch (error) {
+      if (error.code === 'termination-unconfirmed') {
+        const stopping = stopSshRuntime();
+        sshStopError = error.code;
+        sshStopPromise = stopping.then(() => { throw error; });
+        sshStopPromise.catch(() => {});
+      }
+      return { ok: false, errorCode: /^ssh-[a-z-]+$/.test(error.code || '') ? error.code : 'ssh-failed' };
+    }
     finally { sshTestInFlight = null; }
   });
   ipcMain.handle('sshSync:refresh', async () => {

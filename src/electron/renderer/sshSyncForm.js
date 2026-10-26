@@ -6,7 +6,10 @@
   if (root) root.TokenMonitorSshSyncForm = api;
 })(typeof window !== 'undefined' ? window : null, function createSshSyncFormApi() {
   const ERROR_CODES = new Set(['ssh-cancelled', 'ssh-unavailable', 'ssh-auth-failed', 'ssh-host-key',
-    'ssh-agent-unavailable', 'ssh-timeout', 'ssh-output-limit', 'ssh-invalid-output',
+    'ssh-timeout', 'ssh-output-limit', 'ssh-invalid-output', 'ssh-remote-home-missing',
+    'ssh-remote-tools-missing', 'ssh-read-failed', 'ssh-transfer-limit', 'ssh-expanded-limit',
+    'ssh-file-limit', 'ssh-unsafe-archive', 'ssh-no-session-data', 'ssh-local-scan-failed',
+    'ssh-local-storage-failed', 'ssh-test-busy',
     'ssh-password-invalid', 'ssh-password-unsupported', 'ssh-invalid-connection', 'ssh-failed']);
   function pollIntervalMs(value) {
     const seconds = Number(value);
@@ -19,7 +22,7 @@
   function createSshSyncForm({ document, bridge = {}, t, getSettings, saveSettings, onSettings, getPlatform = () => '' }) {
     const el = suffix => document.getElementById(`sshSync${suffix}`);
     const text = (key, params) => t(`settings.sync.ssh.${key}`, params);
-    const inputNames = ['Label', 'AuthMode', 'Alias', 'Host', 'Port', 'Username', 'Password', 'ClearPassword', 'RemotePath'];
+    const inputNames = ['Label', 'AuthMode', 'Alias', 'Host', 'Port', 'Username', 'Password', 'ClearPassword', 'RemoteHome'];
     let settings = getSettings() || {};
     let status = settings.sshSyncStatus || {};
     let draft = null;
@@ -44,6 +47,16 @@
     function errorMessage(value) {
       const code = typeof value === 'string' ? value : value?.code;
       return ERROR_CODES.has(code) ? text(`error.${code}`) : String(value?.message || value || '').slice(0, 500);
+    }
+    function testErrorMessage(value) {
+      const code = value?.errorCode ?? value?.code;
+      if (ERROR_CODES.has(code)) return text(`error.${code}`);
+      if (value?.errorCode !== undefined) return text('failed');
+      // Older Electron handlers reject and keep only message, dropping .code.
+      // Extract a recognized code, never the IPC wrapper or remote diagnostics.
+      const legacy = typeof value === 'string' ? value : String(value?.message || value?.error || '');
+      const recognized = legacy.match(/\bssh-[a-z]+(?:-[a-z]+)*\b/g)?.find(item => ERROR_CODES.has(item));
+      return recognized ? text(`error.${recognized}`) : text('failed');
     }
     function timestamp(value) {
       const date = new Date(value);
@@ -125,7 +138,7 @@
       draft = { ...connection };
       removing = null;
       el('RemoveDecision').hidden = true;
-      const defaults = { Label: '', AuthMode: 'alias', Alias: '', Host: '', Port: 22, Username: '', RemotePath: '~/token-monitor' };
+      const defaults = { Label: '', AuthMode: 'alias', Alias: '', Host: '', Port: 22, Username: '', RemoteHome: '~' };
       for (const [field, fallback] of Object.entries(defaults)) {
         const key = field[0].toLowerCase() + field.slice(1);
         el(field).value = connection[key] ?? fallback;
@@ -149,9 +162,9 @@
     function request() {
       const connection = { id: draft?.id || '', label: el('Label').value.trim(), authMode: el('AuthMode').value,
         alias: el('Alias').value.trim(), host: el('Host').value.trim(), port: Number(el('Port').value),
-        username: el('Username').value.trim(), remotePath: el('RemotePath').value.trim() };
-      if (!connection.remotePath || (connection.authMode === 'alias' ? !connection.alias
-        : !connection.host || !connection.username || !Number.isInteger(connection.port) || connection.port < 1 || connection.port > 65535)) {
+        username: el('Username').value.trim(), remoteHome: el('RemoteHome').value.trim() || '~' };
+      if (connection.authMode === 'alias' ? !connection.alias
+        : !connection.host || !connection.username || !Number.isInteger(connection.port) || connection.port < 1 || connection.port > 65535) {
         throw new Error(text('required'));
       }
       const value = { connection };
@@ -196,10 +209,15 @@
       note(text('saved'));
     }));
     listen('Test', 'click', () => run(async () => {
+      const value = request();
       note(text('testing'));
-      const result = await bridge.testConnection(request());
+      let result;
+      try { result = await bridge.testConnection(value); } catch (error) {
+        if (!disposed) note(testErrorMessage(error), true);
+        return;
+      }
       if (disposed) return;
-      if (!result?.ok) throw new Error(result?.error || text('failed'));
+      if (!result?.ok) { note(testErrorMessage(result), true); return; }
       note(text('testSuccess', { device: result.deviceId || '' }));
     }));
     listen('Refresh', 'click', () => run(async () => {

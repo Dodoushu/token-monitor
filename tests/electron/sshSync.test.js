@@ -5,6 +5,7 @@ const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { gzipSync } = require('node:zlib');
 const test = require('node:test');
 const {
   collectSshDevice, createSshSyncRuntime, normalizeSshConnection, normalizeSshConnections, normalizeSshIntervalMs
@@ -32,9 +33,25 @@ function fakeChild() {
   return child;
 }
 
+function emitArchive(child, name = '.codex/sessions/fixture.jsonl') {
+  const bytes = Buffer.from('{"fixture":true}\n');
+  const header = Buffer.alloc(512);
+  header.write(name);
+  header.write(bytes.length.toString(8).padStart(11, '0') + '\0', 124, 12);
+  header.fill(32, 148, 156);
+  header.write('0', 156);
+  header.write('ustar\0', 257);
+  header.write(header.reduce((sum, value) => sum + value, 0).toString(8).padStart(6, '0') + '\0 ', 148, 8);
+  child.stdout.emit('data', Buffer.concat([Buffer.from('TMSSH1 Linux\n'), gzipSync(Buffer.concat([
+    header, bytes, Buffer.alloc(512 - bytes.length), Buffer.alloc(1024)
+  ]))]));
+  child.stderr.emit('data', Buffer.from('TMSSH_ARCHIVE_OK\n'));
+}
+
 test('SSH connection normalization is allowlisted and rejects argument injection', () => {
   const normalized = normalizeSshConnection({ ...alias, password: 'secret', arbitrary: true });
-  assert.equal(normalized.remotePath, '~/token-monitor');
+  assert.equal(normalized.remoteHome, '~');
+  assert.equal(normalizeSshConnection({ ...alias, remotePath: '~/token-monitor' }).remoteHome, '~');
   assert.equal(normalized.password, undefined);
   assert.equal(normalized.arbitrary, undefined);
   for (const id of ['constructor', 'prototype', '__proto__', 'has.dot', 'x'.repeat(65)]) {
@@ -45,7 +62,7 @@ test('SSH connection normalization is allowlisted and rejects argument injection
   }
   assert.throws(() => normalizeSshConnection({ ...passwordHost, port: 65536 }));
   assert.throws(() => normalizeSshConnection({ ...passwordHost, username: '-root' }));
-  assert.throws(() => normalizeSshConnection({ ...alias, remotePath: '/tmp/a\ncommand' }));
+  assert.throws(() => normalizeSshConnection({ ...alias, remoteHome: '/tmp/a\ncommand' }));
   assert.equal(normalizeSshConnection(passwordHost).port, 2222);
   assert.equal(normalizeSshConnection({ ...passwordHost, host: '[2001:db8::1]' }).host, '[2001:db8::1]');
   assert.throws(() => normalizeSshConnection({ ...passwordHost, host: '[--invalid]' }));
@@ -87,11 +104,18 @@ test('password askpass contains no secret on disk and removes its private direct
   assert.equal(fs.existsSync(folder), false);
 });
 
-test('alias collection preserves SSH config and quotes a remote path without a local shell', async () => {
+test('alias collection reads an isolated mirror and scans locally without remote project dependencies', async () => {
   const child = fakeChild();
   let invocation;
-  const pending = collectSshDevice({ ...alias, remotePath: "~/My folder/a'b;$(evil)" }, {}, {
-    spawn: (...args) => { invocation = args; return child; }
+  let mirrorHome;
+  const pending = collectSshDevice({ ...alias, remoteHome: "~/My folder/a'b;$(evil)" }, {}, {
+    spawn: (...args) => { invocation = args; return child; }, scanLocalMirror: async ({ home, clients, remotePlatform }) => {
+      mirrorHome = home;
+      assert.equal(fs.existsSync(path.join(home, '.codex/sessions/fixture.jsonl')), true);
+      assert.deepEqual(clients, ['codex']);
+      assert.equal(remotePlatform, 'linux');
+      return record();
+    }
   });
   assert.equal(invocation[0], 'ssh');
   assert.equal(invocation[2].shell, false);
@@ -99,72 +123,75 @@ test('alias collection preserves SSH config and quotes a remote path without a l
   assert.ok(invocation[1].includes('StrictHostKeyChecking=yes'));
   assert.ok(!invocation[1].includes('-F'));
   assert.equal(invocation[1].at(-2), 'devbox');
-  assert.match(invocation[1].at(-1), /^cd -- "\$HOME"\/'My folder\/a'"'"'b;\$\(evil\)' && node src\/agent\/agent\.js --once --dry-run --limits=false$/);
-  child.stdout.emit('data', Buffer.from(JSON.stringify(record())));
+  assert.match(invocation[1].at(-1), /^sh -c /);
+  assert.doesNotMatch(invocation[1].at(-1), /node |npm |agent\.js/);
+  emitArchive(child);
   child.emit('close', 0);
   const result = await pending;
   assert.equal(result.deviceId, 'remote-device');
   assert.equal(result.periods.today.totalTokens, 12);
   assert.equal(result.secret, undefined);
+  assert.equal(fs.existsSync(mirrorHome), false);
 });
 
 test('password collection passes the password only through child environment and cleans after close', async () => {
   const child = fakeChild();
   let invocation;
   const pending = collectSshDevice(passwordHost, { password: 'hunter-two' }, {
-    platform: 'linux', spawn: (...args) => { invocation = args; return child; }
+    platform: 'linux', spawn: (...args) => { invocation = args; return child; }, scanLocalMirror: async () => record()
   });
   assert.equal(invocation[1].includes('hunter-two'), false);
   assert.equal(invocation[2].env.TOKEN_MONITOR_SSH_PASSWORD, 'hunter-two');
   assert.equal(invocation[2].env.SSH_ASKPASS_REQUIRE, 'force');
   const helper = invocation[2].env.SSH_ASKPASS;
   assert.ok(fs.existsSync(helper));
-  child.stdout.emit('data', Buffer.from(JSON.stringify(record())));
+  emitArchive(child);
   child.emit('close', 0);
   await pending;
   assert.equal(fs.existsSync(helper), false);
 });
 
-test('quoted remote paths execute literally even with shell metacharacters', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-ssh-path-'));
+test('local scan errors and cancellation still clean up the temporary mirror', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-ssh-cleanup-'));
   const child = fakeChild();
-  let command;
+  let mirrorHome;
   try {
-    const remotePath = path.join(root, "folder'a;$(touch injected)");
-    fs.mkdirSync(remotePath);
-    const bin = path.join(root, 'bin');
-    fs.mkdirSync(bin);
-    fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify(record())}'\n`, { mode: 0o700 });
-    const pending = collectSshDevice({ ...alias, remotePath }, {}, { spawn: (_file, args) => {
-      command = args.at(-1);
-      return child;
-    } });
-    const { execFile } = require('node:child_process');
-    const stdout = await new Promise((resolve, reject) => execFile('/bin/sh', ['-c', command], {
-      cwd: root, env: { ...process.env, PATH: bin }
-    }, (error, output) => error ? reject(error) : resolve(output)));
-    child.stdout.emit('data', Buffer.from(stdout));
+    const pending = collectSshDevice(alias, {}, { tmpdir: root, spawn: () => child,
+      scanLocalMirror: async ({ home }) => { mirrorHome = home; throw new Error('private scanner details'); } });
+    emitArchive(child);
     child.emit('close', 0);
-    assert.equal((await pending).periods.allTime.totalTokens, 48);
-    assert.equal(fs.existsSync(path.join(root, 'injected')), false);
+    await assert.rejects(pending, (error) => error.code === 'ssh-local-scan-failed' && !error.message.includes('private'));
+    assert.equal(fs.existsSync(mirrorHome), false);
+    assert.deepEqual(fs.readdirSync(root), []);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('a local scanner with unconfirmed termination preserves the runtime poison error', async () => {
+  const child = fakeChild();
+  const error = Object.assign(new Error('local worker did not close'), { code: 'termination-unconfirmed' });
+  const pending = collectSshDevice(alias, {}, { spawn: () => child, scanLocalMirror: async () => { throw error; } });
+  emitArchive(child);
+  child.emit('close', 0);
+  await assert.rejects(pending, (actual) => actual === error);
+});
+
 test('SSH failures classify authentication and host-key errors without leaking output', async () => {
-  for (const [stderr, expected] of [
-    ['Permission denied: password=hunter-two', 'ssh-auth-failed'],
-    ['Host key verification failed.', 'ssh-host-key'],
-    ['node: command not found', 'ssh-agent-unavailable']
+  for (const [stderr, expected, exitCode] of [
+    ['Permission denied: password=hunter-two', 'ssh-auth-failed', 255],
+    ['Host key verification failed.', 'ssh-host-key', 255],
+    ['TMSSH_HOME_MISSING\n', 'ssh-remote-home-missing', 71],
+    ['TMSSH_TOOLS_MISSING\n', 'ssh-remote-tools-missing', 72],
+    ['TMSSH_ARCHIVE_FAILED\n', 'ssh-read-failed', 0]
   ]) {
     const child = fakeChild();
     const pending = collectSshDevice(alias, {}, { spawn: () => child });
     child.stderr.emit('data', Buffer.from(stderr));
-    child.emit('close', 255);
+    child.emit('close', exitCode);
     await assert.rejects(pending, (error) => error.code === expected && !error.message.includes('hunter-two'));
   }
 });
 
-test('SSH cancellation remains pending until close and malformed output is rejected', async () => {
+test('SSH cancellation remains pending until close and malformed archives are rejected', async () => {
   const controller = new AbortController();
   const child = fakeChild();
   let settled = false;
@@ -177,12 +204,13 @@ test('SSH cancellation remains pending until close and malformed output is rejec
   child.emit('close', null);
   await assert.rejects(pending, { code: 'ssh-cancelled' });
 
-  for (const output of ['not json', '{}', JSON.stringify({ ...record(), month: undefined })]) {
+  for (const output of ['not a framed archive', '{}', 'TMSSH1 Linux\ncorrupted tar']) {
     const invalid = fakeChild();
     const read = collectSshDevice(alias, {}, { spawn: () => invalid });
     invalid.stdout.emit('data', Buffer.from(output));
+    invalid.stderr.emit('data', Buffer.from('TMSSH_ARCHIVE_OK\n'));
     invalid.emit('close', 0);
-    await assert.rejects(read, { code: 'ssh-invalid-output' });
+    await assert.rejects(read, { code: 'ssh-unsafe-archive' });
   }
 });
 
@@ -190,9 +218,10 @@ test('SSH output overflow terminates the child and waits for close', async () =>
   const child = fakeChild();
   const pending = collectSshDevice(alias, { maxOutputBytes: 8 }, { spawn: () => child });
   child.stdout.emit('data', Buffer.from('too much output'));
+  await flush();
   assert.deepEqual(child.signals, ['SIGTERM']);
   child.emit('close', null);
-  await assert.rejects(pending, { code: 'ssh-output-limit' });
+  await assert.rejects(pending, { code: 'ssh-transfer-limit' });
 });
 
 test('SSH timeout and spawn errors are classified without exposing subprocess details', async () => {
@@ -236,6 +265,20 @@ test('an unconfirmed forced close stops runtime admission and makes stop fail cl
   assert.equal(count, 1);
   assert.equal(runtime.getStatus().running, false);
   child.emit('close', null);
+});
+
+test('a fatal close remains visible after an earlier host reports a recoverable error', async () => {
+  const runtime = createSshSyncRuntime({
+    connections: [alias, { ...alias, id: 'second' }],
+    collect: async (connection) => {
+      throw Object.assign(new Error('collection failed'), {
+        code: connection.id === alias.id ? 'ssh-failed' : 'termination-unconfirmed'
+      });
+    }
+  });
+  await runtime.start();
+  assert.equal(runtime.getStatus().error, 'termination-unconfirmed');
+  await assert.rejects(runtime.stop(), { code: 'termination-unconfirmed' });
 });
 
 test('runtime starts immediately, coalesces concurrent refreshes and polls on configured interval', async () => {

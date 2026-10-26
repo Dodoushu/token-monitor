@@ -288,9 +288,9 @@ brew install --cask token-monitor
 
 ## 多设备同步
 
-要从远端 Linux/macOS 主机拉取用量，可选择 **通过 SSH 采集**。支持本机 SSH 别名或主机、账号和密码，轮询间隔可手动设置。远端需先准备 Token Monitor 项目环境，详见 [SSH 配置说明](docs/ssh-sync.zh-CN.md)。
+要从远端 Linux/macOS 主机拉取用量，可选择 **通过 SSH 采集**，手动设置轮询间隔。支持本机 SSH 别名或主机、账号和密码；远端只需系统 SSH、`sh`、`find` 和 `tar`，会话文件传回本机解析，不安装远端 Agent、运行时或扫描器。支持 Claude Code、Codex、Kimi 等文件型来源，暂不支持 OpenCode 等实时数据库，详见 [SSH 配置说明](docs/ssh-sync.zh-CN.md)。
 
-挑一个供设备（与任何无头代理）使用的多设备同步后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 [headless agent](#headless-agent)。iCloud Drive 仅供 macOS 小部件使用，不支持无头代理。
+在“设置 → 多设备同步”中选择一种方式。使用 Hub 或 Worker 时，小部件会自动上报本机用量，没有小部件的机器可运行 [headless agent](#headless-agent)。SSH 模式由本机主动拉取远端会话文件。iCloud Drive 仅供 macOS 小部件使用，不支持无头代理。
 
 #### 方案 A——直接在小部件内开 hub（最简单，无需命令行）
 

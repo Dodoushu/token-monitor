@@ -1571,7 +1571,7 @@
                 <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
               </div>
               <div id="sshSyncFields" class="hub-mode-fields ssh-sync-fields" hidden inert>
-                <p class="settings-note" data-i18n="settings.sync.ssh.note">Read remote usage over SSH without a hub. Each machine needs Node.js and a prepared Token Monitor checkout.</p>
+                <p class="settings-note" data-i18n="settings.sync.ssh.note">Read file-based sessions such as Claude Code, Codex and Kimi over SSH, then calculate usage locally. Database-based sources such as OpenCode are not supported.</p>
                 <div id="sshSyncList" class="ssh-sync-list" role="list" aria-label="SSH machines" data-i18n-aria-label="settings.sync.ssh.machines"></div>
                 <p id="sshSyncEmpty" class="settings-note" data-i18n="settings.sync.ssh.empty">No SSH machines added.</p>
                 <div class="settings-actions">
@@ -1605,8 +1605,8 @@
                     <label id="sshSyncClearPasswordRow" class="checkbox-label" for="sshSyncClearPassword" hidden><span data-i18n="settings.sync.ssh.clearPassword">Clear saved password</span><input id="sshSyncClearPassword" type="checkbox" /></label>
                   </div>
                   <p id="sshSyncPasswordUnsupported" class="settings-note" data-i18n="settings.sync.ssh.passwordUnsupported" hidden>On Windows, use an SSH alias with a key or SSH agent.</p>
-                  <label for="sshSyncRemotePath"><span data-i18n="settings.sync.ssh.remotePath">Token Monitor directory on remote machine</span><input id="sshSyncRemotePath" type="text" spellcheck="false" value="~/token-monitor" autocomplete="off" /></label>
-                  <p class="settings-note" data-i18n="settings.sync.ssh.setupNote">Prepare the remote checkout and dependencies first. Verify its host key once in a terminal with ssh. Collection does not install software on the remote machine.</p>
+                  <label for="sshSyncRemoteHome"><span data-i18n="settings.sync.ssh.remoteHome">Remote user home directory (optional)</span><input id="sshSyncRemoteHome" type="text" spellcheck="false" value="~" placeholder="~" autocomplete="off" aria-describedby="sshSyncSetupNote" /></label>
+                  <p id="sshSyncSetupNote" class="settings-note" data-i18n="settings.sync.ssh.setupNote">Defaults to the SSH user's HOME. Reads session logs with remote sh, find and tar, then parses them on this computer. Verify the host key once with ssh in a terminal.</p>
                   <div class="settings-actions">
                     <button id="sshSyncTest" type="button" data-i18n="settings.sync.ssh.test">Test collection</button>
                     <button id="sshSyncSave" type="button" data-i18n="settings.common.save">Save</button>

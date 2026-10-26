@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createSshSyncSettings } = require('../../src/electron/sshSyncSettings');
 
-function fixture() {
+function fixture(options = {}) {
   let settings = { sshConnections: [] };
   let document = { version: 1, credentials: {}, migrations: {} };
   let fail = false;
@@ -12,8 +12,8 @@ function fixture() {
     getSettings: () => settings,
     store: { readDocument: () => structuredClone(document), writeDocument: (value) => { document = structuredClone(value); } },
     commitConnections: (value) => { if (fail) throw new Error('disk full'); settings = { ...settings, sshConnections: value }; },
-    normalize: (value) => ({ id: value.id, label: value.label || '', authMode: value.authMode || 'password', host: value.host, port: value.port || 22, username: value.username || 'user', remotePath: value.remotePath || '~/token-monitor' }),
-    collect: async (connection, options) => ({ deviceId: connection.host, passwordUsed: options.password })
+    normalize: (value) => ({ id: value.id, label: value.label || '', authMode: value.authMode || 'password', host: value.host, port: value.port || 22, username: value.username || 'user', remoteHome: value.remoteHome || '~' }),
+    collect: options.collect || (async (connection, options) => ({ deviceId: connection.host, passwordUsed: options.password }))
   });
   return { service, settings: () => settings, document: () => document, fail: () => { fail = true; } };
 }
@@ -80,4 +80,14 @@ test('testing an edited endpoint never borrows its saved password', async () => 
   f.service.save({ connection: { id: 'dev', host: 'trusted' }, password: 'private-value' });
   await assert.rejects(f.service.test({ connection: { id: 'dev', host: 'other' } }), /password/i);
   assert.deepEqual(await f.service.test({ connection: { id: 'dev', host: 'trusted' } }), { ok: true, deviceId: 'trusted' });
+});
+
+test('an unconfirmed manually tested process blocks further SSH admission until restart', async () => {
+  let scans = 0;
+  const f = fixture({ collect: async () => { scans += 1; throw Object.assign(new Error('not closed'), { code: 'termination-unconfirmed' }); } });
+  const request = { connection: { id: 'dev', host: 'host' }, password: 'pass' };
+  await assert.rejects(f.service.test(request), error => error.code === 'termination-unconfirmed');
+  await assert.rejects(f.service.test(request), error => error.code === 'termination-unconfirmed');
+  assert.throws(() => f.service.assertAvailable(), error => error.code === 'termination-unconfirmed');
+  assert.equal(scans, 1);
 });

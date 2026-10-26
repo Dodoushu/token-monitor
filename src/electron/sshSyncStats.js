@@ -5,8 +5,8 @@ const { syncPayload } = require('../shared/syncPayload');
 const { composeLocalSyncSummary } = require('./syncDisplayStats');
 
 function identity(connection) {
-  const { id, authMode, alias, host, port, username, remotePath } = connection;
-  return JSON.stringify([id, authMode, alias, host, port, username, remotePath]);
+  const { id, authMode, alias, host, port, username, remoteHome } = connection;
+  return JSON.stringify([id, authMode, alias, host, port, username, remoteHome]);
 }
 
 function createSshDeviceSnapshots({ getConnections, getIntervalMs, now = Date.now }) {

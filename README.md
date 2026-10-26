@@ -283,9 +283,9 @@ Local mode is the default: launch the app and it starts tracking this device. No
 
 ## Multi-device sync
 
-To pull usage directly from remote Linux/macOS machines, choose **Collect over SSH**. Use a local SSH alias or a host/username/password connection, configure the polling interval, and prepare a remote Token Monitor checkout. See [SSH setup and authentication](docs/ssh-sync.md).
+To pull usage directly from remote Linux/macOS machines, choose **Collect over SSH** and set the polling interval. Connect with a local SSH alias or a host/username/password connection. The remote machine only needs its system SSH, `sh`, `find` and `tar`; supported session files are transferred to this computer and parsed locally. No remote agent, runtime or scanner is installed. SSH collection supports file-based sources such as Claude Code, Codex and Kimi; live databases such as OpenCode are not supported. See [SSH setup and authentication](docs/ssh-sync.md).
 
-Pick ONE multi-device sync backend for your devices (and any headless agents). On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run the [headless agent](#headless-agent) only on machines without a widget. iCloud Drive is a macOS-widget-only option and does not support headless agents.
+Choose a mode under Settings → Multi-device Sync. For Hub or Worker sync, the widget contributes this device's usage automatically; run the [headless agent](#headless-agent) on machines without a widget. SSH mode pulls remote session files from this desktop. iCloud Drive is a macOS-widget-only option and does not support headless agents.
 
 #### Option A — Host the hub from the widget (easiest, no CLI)
 
