@@ -213,6 +213,7 @@ for (const failure of ['cleanup', 'preferences', 'bind']) test(`host ${failure} 
   let failing = true;
   const originalState = { identity: 'old', enabled: { sessionTitles: true }, pendingTitleCleanup: [] };
   const sandbox = vm.createContext({
+    sshSettingsService: null,
     settings: { hubMode: 'host', hubHostPort: 17321, hubHostSecret: '', syncContentState: originalState },
     embeddedHub: null, embeddedHubError: null, modeQueue: Promise.resolve(), hubModeGeneration: 0,
     console: { log: () => {} }, normalizeHubPort: value => value,
@@ -238,7 +239,7 @@ for (const failure of ['cleanup', 'preferences', 'bind']) test(`host ${failure} 
     getHubInfo: () => ({ error: sandbox.embeddedHubError, listening: Boolean(sandbox.embeddedHub), secret: sandbox.settings.hubHostSecret }),
     sendHubPush: payload => events.push(payload),
     advanceMacWidgetProducerAndSourceEpoch: () => {}, clearLatestHubStatsCache: () => {},
-    stopIcloudRuntime: async () => {}, stopLocalCollector: () => events.push('stopLocal'),
+    stopIcloudRuntime: async () => {}, stopSshRuntime: async () => {}, stopLocalCollector: () => events.push('stopLocal'),
     stopStatsStream: () => {}, stopHostStats: () => {}, stopSyncCollector: () => {},
     syncStatsPublication: { cancel: () => {} },
     startLocalCollector: () => events.push('local'), startHostStats: () => events.push('hostStats'),

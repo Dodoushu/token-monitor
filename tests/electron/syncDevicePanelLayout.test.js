@@ -164,18 +164,19 @@ test('device presence uses a static solid online dot and an outlined offline dot
 
 test('sync method selects the corresponding fields without touching draft input values', () => {
   const source = functionSource('syncHubModeUi', 'renderIcloudStatus');
-  for (const mode of ['local', 'client', 'host', 'icloud']) {
+  for (const mode of ['local', 'client', 'host', 'icloud', 'ssh']) {
     const hidden = {};
     const field = id => ({ classList: { toggle(name, value) { hidden[id] = value; } } });
     const context = vm.createContext({
       syncContentForm: null,
+      sshSyncForm: { syncSettings() { hidden.ssh = mode !== 'ssh'; } },
       state: { settings: { hubMode: mode }, appInfo: { platform: 'win32' } },
       els: {
         hubModeOptions: {}, syncModeDescription: {}, icloudModeOption: {},
         hubClientFields: field('client'), hubHostFields: field('host'), icloudFields: field('icloud'),
         hubSecretInput: {}, hubUrlInput: { value: 'https://draft.test' }, secretInput: { value: 'draft' }
       },
-      SYNC_MODE_DESCRIPTIONS: { local: 'local', client: 'client', host: 'host', icloud: 'icloud' },
+      SYNC_MODE_DESCRIPTIONS: { local: 'local', client: 'client', host: 'host', icloud: 'icloud', ssh: 'ssh' },
       syncModeSelect: { sync() {} },
       t: key => key, renderHubStatus() {}, renderIcloudStatus() {}, renderSyncPanel() {},
       renderHubBuildStatus() {}, syncHubConnectionUi() {}, syncHubSaveButton() {}
@@ -185,6 +186,7 @@ test('sync method selects the corresponding fields without touching draft input 
     assert.equal(context.els.icloudModeOption.disabled, true);
     assert.equal(context.els.hubModeOptions.value, mode);
     assert.ok(context.els.syncModeDescription.textContent);
+    assert.equal(hidden.ssh, mode !== 'ssh');
     for (const id of ['client', 'host', 'icloud']) {
       assert.equal(hidden[id], mode !== id);
       const node = context.els[id === 'client' ? 'hubClientFields' : id === 'host' ? 'hubHostFields' : 'icloudFields'];

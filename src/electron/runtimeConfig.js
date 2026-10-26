@@ -23,6 +23,7 @@ const MODE_STRUCTURAL_KEYS = Object.freeze([
   'secret',
   'hubHostPort',
   'hubHostSecret',
+  'sshPollIntervalMs',
   'deviceId'
 ]);
 const USAGE_STRUCTURAL_KEYS = Object.freeze([

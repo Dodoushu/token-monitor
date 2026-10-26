@@ -355,7 +355,7 @@
   }
 
   function isSharedSyncMode(hubMode) {
-    return hubMode === 'client' || hubMode === 'host' || hubMode === 'icloud';
+    return hubMode === 'client' || hubMode === 'host' || hubMode === 'icloud' || hubMode === 'ssh';
   }
 
   function selectLiveTokenRatePeriods(stats, deviceId, hubMode = 'local', scope = 'all') {

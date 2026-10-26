@@ -79,6 +79,7 @@ function devicesWithLocalHistory(records, localDevice) {
 function completeHistorySource(options = {}) {
   const { embeddedHub, hubMode, hubUrl, icloudSync, mode, historyEnabled = true } = options;
   if (historyEnabled === false) return 'empty';
+  if (hubMode === 'ssh') return 'ssh';
   if (mode === 'local') return 'local';
   if (hubMode === 'host' && embeddedHub) return 'embedded';
   if (hubMode === 'icloud' && icloudSync) return 'icloud';
@@ -99,6 +100,8 @@ async function resolveCompleteHistory(options = {}) {
   } = options;
   const aggregate = typeof aggregateHistory === 'function' ? aggregateHistory : () => parseCompleteHistory(null);
   switch (completeHistorySource(options)) {
+    case 'ssh':
+      return parseCompleteHistory(aggregate(options.sshDevices || []));
     case 'empty':
       return parseCompleteHistory(aggregate([]));
     case 'local':
@@ -146,6 +149,9 @@ async function resolveCompleteHistoryWithDevices(options = {}) {
   const aggregate = typeof aggregateHistory === 'function' ? aggregateHistory : () => parseCompleteHistory(null);
   let records;
   switch (completeHistorySource(options)) {
+    case 'ssh':
+      records = options.sshDevices || [];
+      break;
     case 'empty':
       records = [];
       break;

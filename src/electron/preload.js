@@ -4,6 +4,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('tokenMonitor', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
+  sshSync: {
+    getStatus: () => ipcRenderer.invoke('sshSync:status'),
+    saveConnection: (options) => ipcRenderer.invoke('sshSync:saveConnection', options),
+    removeConnection: (id) => ipcRenderer.invoke('sshSync:removeConnection', id),
+    testConnection: (options) => ipcRenderer.invoke('sshSync:testConnection', options),
+    refresh: () => ipcRenderer.invoke('sshSync:refresh')
+  },
   updateSettings: (patch) => {
     // Membership is owned by the dedicated account commands, never generic settings.
     const { workbuddyManagedAccounts: _managedAccounts, ...safePatch } = patch || {};

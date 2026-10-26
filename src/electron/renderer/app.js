@@ -18,6 +18,7 @@ const accountProfileStatuses = accountShellApi.createRequestGuard();
 const accountProfileSaves = accountShellApi.createBusyGuard();
 const accountShellErrors = Object.create(null);
 let syncContentForm = null;
+let sshSyncForm = null;
 
 function setAccountShellError(id, message) {
   accountShellErrors[id] = message || '';
@@ -52,8 +53,8 @@ const vendorPresentationApi = window.TokenMonitorVendorPresentation;
 const clientsWithIcon = new Set(vendorPresentationApi.VENDOR_IDS);
 const limitMarksWithIcon = new Set(vendorPresentationApi.MARK_IDS);
 
-// Modes whose device list is shared with other machines; only these can remove one.
-const SHARED_SYNC_MODES = new Set(['client', 'host', 'icloud']);
+// Modes that combine this machine's usage with records from other machines.
+const SHARED_SYNC_MODES = new Set(['client', 'host', 'icloud', 'ssh']);
 
 function osIconFor(platform) {
   const prefix = String(platform || '').toLowerCase().split('-')[0];
@@ -602,12 +603,14 @@ const SYNC_MODE_DESCRIPTIONS = {
   local: 'settings.sync.localOnlyDesc',
   client: 'settings.sync.connectHubDesc',
   host: 'settings.sync.hostHubDesc',
+  ssh: 'settings.sync.ssh.description',
   icloud: 'settings.sync.icloudDesc'
 };
 const SYNC_MODE_ICON_PATHS = {
   local: ['M5 4h14v12H5z', 'M2 20h20l-3-4H5z'],
   client: ['M10 13a5 5 0 0 0 7 .5l3-3a5 5 0 0 0-7-7l-2 2', 'M14 11a5 5 0 0 0-7-.5l-3 3a5 5 0 0 0 7 7l2-2'],
   host: ['M4 3h16v7H4z', 'M4 14h16v7H4z', 'M7 6.5h.01M7 17.5h.01', 'M11 6.5h6M11 17.5h6'],
+  ssh: ['M4 5h16v14H4z', 'm8 9 3 3-3 3', 'M13 15h3'],
   icloud: ['M7 18H6a4 4 0 1 1 .7-7.9A6 6 0 0 1 18 8a5 5 0 0 1 0 10H7']
 };
 const syncModeIcons = Object.fromEntries(Object.entries(SYNC_MODE_ICON_PATHS).map(([mode, paths]) => [mode, (doc) => {
@@ -784,7 +787,7 @@ function setSettingsSectionExpanded(section, expanded) {
   }
   state.settingsSections[id] = next;
   applySettingsSectionDom(id, next);
-  if (id === 'sync' && next) void syncContentForm?.refresh();
+  if (id === 'sync' && next) { void syncContentForm?.refresh(); void sshSyncForm?.refreshStatus(); }
 }
 
 // Expanding a section auto-collapses the previously open one. When that one
@@ -880,7 +883,7 @@ function viewsSummary() {
 function settingsSectionSummary(section) {
   if (!state.settings) return '';
   if (section === 'sync') {
-    const modeKeys = { host: 'settings.sync.hostHub', client: 'settings.sync.connectHub', icloud: 'settings.sync.icloud' };
+    const modeKeys = { host: 'settings.sync.hostHub', client: 'settings.sync.connectHub', icloud: 'settings.sync.icloud', ssh: 'settings.sync.ssh.title' };
     const label = t(modeKeys[state.settings.hubMode] || 'settings.sync.localOnly');
     const devices = SHARED_SYNC_MODES.has(state.settings.hubMode) && state.mode === 'sync' ? state.stats?.devices : null;
     if (!Array.isArray(devices) || devices.length === 0) return label;
@@ -8722,6 +8725,7 @@ async function saveAppearanceFromControls() {
 
 function syncHubModeUi() {
   syncContentForm?.syncSettings();
+  sshSyncForm?.syncSettings();
   const mode = state.settings.hubMode || 'local';
   els.hubModeOptions.value = mode;
   if (els.syncModeDescription) els.syncModeDescription.textContent = t(SYNC_MODE_DESCRIPTIONS[mode] || SYNC_MODE_DESCRIPTIONS.local);
@@ -8840,7 +8844,7 @@ function renderSyncPanel() {
   syncPanelRows = state.mode === 'sync'
     ? syncDevicePanelApi.deviceRows(state.stats?.devices, {
       localDeviceId: state.settings?.deviceId || ''
-    })
+    }).map(row => hubMode === 'ssh' ? { ...row, canRemove: false } : row)
     : [];
   renderSyncPanelConnection(hubMode);
   renderSyncPanelDevices(syncPanelRows);
@@ -14091,6 +14095,10 @@ window.tokenMonitor.onWindowVisibilityPush?.((visible) => {
 
 window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;
+  if (payload.event === 'ssh-sync') {
+    sshSyncForm?.applyStatus(payload.data?.status || payload.status);
+    return;
+  }
   if (payload.event === 'session-activity') {
     localSessionActivity = payload.data;
     state.stats = applyLocalSessionActivity(state.stats);
@@ -18701,6 +18709,12 @@ initSettingsAnimationWrappers();
 syncContentForm = window.TokenMonitorSyncContentForm.createSyncContentForm({
   document, bridge: window.tokenMonitor, t, saveSettings, getSettings: () => state.settings
 });
+sshSyncForm = window.TokenMonitorSshSyncForm.createSshSyncForm({
+  document, bridge: window.tokenMonitor.sshSync, t, saveSettings,
+  getSettings: () => state.settings, getPlatform: () => state.appInfo?.platform,
+  onSettings: next => applyPersistedSettings(next, state.settingsPushRevision)
+});
+window.addEventListener('unload', () => sshSyncForm?.dispose(), { once: true });
 setupSettingsAccordion(
   document.getElementById('syncContentGroup'), document.getElementById('syncContentToggle'),
   document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)

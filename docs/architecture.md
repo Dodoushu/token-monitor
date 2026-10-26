@@ -156,6 +156,14 @@ Manual device removal requires a known remote device marked stale in main's late
 
 ## Settings and credentials
 
+### SSH polling
+
+Electron's `sshSync.js` owns system-OpenSSH transport and serial polling; `sshSyncSettings.js` stores allowlisted connection metadata in settings and dynamic passwords under `credentials.ssh`. Dedicated IPC commands receive password drafts; ordinary settings patches cannot replace connections or return passwords. A changed password endpoint cannot borrow the old endpoint's credential. Alias mode uses unattended system SSH configuration; password authentication uses a temporary POSIX askpass helper without embedding a secret in its file or argv. Host-key verification remains strict.
+
+`hubMode: 'ssh'` keeps the local collector and imports remote one-shot `agent.js --dry-run --limits=false` records from a prepared checkout. `sshSyncStats.js` sanitizes imported records with the existing sync projection, namespaces device IDs by connection, retains last-good snapshots in memory and invalidates changed endpoints. Full History and fixed ranges use the same in-process device set. Connection labels are an Electron presentation overlay, not a wire field. Deadlines, output caps, cancellation and a confirmed-close barrier prevent overlapping rounds; unconfirmed termination blocks new SSH launches while other sync modes can recover independently. See [SSH setup](ssh-sync.md) for remote prerequisites and platform boundaries.
+
+### Existing settings contracts
+
 - **Configuration.** `loadDotEnv()` never overrides existing process variables. Node entry points load the root `.env`, Electron only when unpackaged, and Worker uses deployment bindings. Agent/Hub precedence is CLI flag → env → default where a flag exists; there is no JSON configuration file. [`.env.example`](../.env.example) is the operator contract.
 - **Storage.** Widget preferences/account metadata live in `userData/settings.json`; raw GUI credentials live in `userData/credentials.json`. The store is plaintext with POSIX `0600` or Windows userData ACLs, not protection from same-user processes. Agent and standalone Hub never read it.
 - **Redaction.** Renderer settings are default-deny; raw credentials cross only through an explicit allowlist. Connection summaries expose the host, not URL credentials/path/query/fragment. Provider credentials and private cleanup contexts remain in main.

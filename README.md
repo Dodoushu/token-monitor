@@ -283,6 +283,8 @@ Local mode is the default: launch the app and it starts tracking this device. No
 
 ## Multi-device sync
 
+To pull usage directly from remote Linux/macOS machines, choose **Collect over SSH**. Use a local SSH alias or a host/username/password connection, configure the polling interval, and prepare a remote Token Monitor checkout. See [SSH setup and authentication](docs/ssh-sync.md).
+
 Pick ONE multi-device sync backend for your devices (and any headless agents). On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run the [headless agent](#headless-agent) only on machines without a widget. iCloud Drive is a macOS-widget-only option and does not support headless agents.
 
 #### Option A — Host the hub from the widget (easiest, no CLI)

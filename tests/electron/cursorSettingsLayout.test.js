@@ -2070,6 +2070,7 @@ function loadHubSettingsWiring(els, context) {
   const vmContext = {
     els,
     syncContentForm: null,
+    sshSyncForm: null,
     SYNC_MODE_DESCRIPTIONS: { local: 'local', client: 'client', host: 'host', icloud: 'icloud' },
     syncModeSelect: { sync() {} },
     document: { activeElement: null },

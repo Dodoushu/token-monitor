@@ -1506,6 +1506,7 @@
                     <option value="local" data-i18n="settings.sync.localOnly">Local only</option>
                     <option value="client" data-i18n="settings.sync.connectHub">Connect to a hub</option>
                     <option value="host" data-i18n="settings.sync.hostHub">Host hub on this device</option>
+                    <option value="ssh" data-i18n="settings.sync.ssh.title">Collect over SSH</option>
                     <option value="icloud" data-i18n="settings.sync.icloud">iCloud Drive</option>
                   </select>
                   <span class="settings-section-disclosure" aria-hidden="true"></span>
@@ -1568,6 +1569,55 @@
                 <div id="hubAddressList" class="hub-address-list"></div>
                 <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. macOS / Windows may prompt to allow incoming connections the first time. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
                 <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
+              </div>
+              <div id="sshSyncFields" class="hub-mode-fields ssh-sync-fields" hidden inert>
+                <p class="settings-note" data-i18n="settings.sync.ssh.note">Read remote usage over SSH without a hub. Each machine needs Node.js and a prepared Token Monitor checkout.</p>
+                <div id="sshSyncList" class="ssh-sync-list" role="list" aria-label="SSH machines" data-i18n-aria-label="settings.sync.ssh.machines"></div>
+                <p id="sshSyncEmpty" class="settings-note" data-i18n="settings.sync.ssh.empty">No SSH machines added.</p>
+                <div class="settings-actions">
+                  <button id="sshSyncAdd" type="button" data-i18n="settings.sync.ssh.add">Add machine</button>
+                  <button id="sshSyncRefresh" type="button" data-i18n="settings.sync.ssh.refresh">Collect now</button>
+                </div>
+                <div id="sshSyncRemoveDecision" class="ssh-sync-decision" hidden>
+                  <p id="sshSyncRemoveCopy"></p>
+                  <div class="settings-actions">
+                    <button id="sshSyncRemoveConfirm" type="button" data-i18n="settings.sync.ssh.remove">Remove</button>
+                    <button id="sshSyncRemoveCancel" type="button" data-i18n="settings.common.cancel">Cancel</button>
+                  </div>
+                </div>
+                <div id="sshSyncEditor" class="ssh-sync-editor" hidden>
+                  <label for="sshSyncLabel"><span data-i18n="settings.sync.ssh.label">Display name (optional)</span><input id="sshSyncLabel" type="text" maxlength="100" spellcheck="false" autocomplete="off" /></label>
+                  <label for="sshSyncAuthMode"><span data-i18n="settings.sync.ssh.authentication">Connection method</span>
+                    <select id="sshSyncAuthMode">
+                      <option value="alias" data-i18n="settings.sync.ssh.aliasMode">Local SSH alias / key</option>
+                      <option id="sshSyncPasswordOption" value="password" data-i18n="settings.sync.ssh.passwordMode">Username and password</option>
+                    </select>
+                  </label>
+                  <div id="sshSyncAliasFields">
+                    <label for="sshSyncAlias"><span data-i18n="settings.sync.ssh.alias">SSH alias</span><input id="sshSyncAlias" type="text" spellcheck="false" placeholder="devbox" autocomplete="off" /></label>
+                    <p class="settings-note" data-i18n="settings.sync.ssh.aliasNote">Uses your local OpenSSH config, keys and SSH agent.</p>
+                  </div>
+                  <div id="sshSyncPasswordFields" class="ssh-sync-password-fields" hidden inert>
+                    <label for="sshSyncHost"><span data-i18n="settings.sync.ssh.host">Hostname or IP</span><input id="sshSyncHost" type="text" spellcheck="false" autocomplete="off" /></label>
+                    <label for="sshSyncPort"><span data-i18n="settings.sync.ssh.port">SSH port</span><input id="sshSyncPort" type="number" min="1" max="65535" value="22" /></label>
+                    <label for="sshSyncUsername"><span data-i18n="settings.sync.ssh.username">Username</span><input id="sshSyncUsername" type="text" spellcheck="false" autocomplete="off" /></label>
+                    <label for="sshSyncPassword"><span data-i18n="settings.sync.ssh.password">Password</span><input id="sshSyncPassword" type="password" spellcheck="false" autocomplete="new-password" /></label>
+                    <label id="sshSyncClearPasswordRow" class="checkbox-label" for="sshSyncClearPassword" hidden><span data-i18n="settings.sync.ssh.clearPassword">Clear saved password</span><input id="sshSyncClearPassword" type="checkbox" /></label>
+                  </div>
+                  <p id="sshSyncPasswordUnsupported" class="settings-note" data-i18n="settings.sync.ssh.passwordUnsupported" hidden>On Windows, use an SSH alias with a key or SSH agent.</p>
+                  <label for="sshSyncRemotePath"><span data-i18n="settings.sync.ssh.remotePath">Token Monitor directory on remote machine</span><input id="sshSyncRemotePath" type="text" spellcheck="false" value="~/token-monitor" autocomplete="off" /></label>
+                  <p class="settings-note" data-i18n="settings.sync.ssh.setupNote">Prepare the remote checkout and dependencies first. Verify its host key once in a terminal with ssh. Collection does not install software on the remote machine.</p>
+                  <div class="settings-actions">
+                    <button id="sshSyncTest" type="button" data-i18n="settings.sync.ssh.test">Test collection</button>
+                    <button id="sshSyncSave" type="button" data-i18n="settings.common.save">Save</button>
+                    <button id="sshSyncCancel" type="button" data-i18n="settings.common.cancel">Cancel</button>
+                  </div>
+                </div>
+                <label for="sshSyncInterval"><span data-i18n="settings.sync.ssh.interval">Polling interval (seconds)</span><input id="sshSyncInterval" type="number" min="15" max="86400" step="1" value="300" aria-describedby="sshSyncIntervalNote" /></label>
+                <p id="sshSyncIntervalNote" class="settings-note" data-i18n="settings.sync.ssh.intervalNote">15–86400 seconds. The next collection waits for the current one to finish.</p>
+                <div class="settings-actions"><button id="sshSyncSaveInterval" type="button" data-i18n="settings.sync.ssh.saveInterval">Save interval</button></div>
+                <p id="sshSyncStatus" class="settings-note" role="status" aria-live="polite"></p>
+                <p id="sshSyncMessage" class="hub-status" role="alert" hidden></p>
               </div>
               <div id="icloudFields" class="hub-mode-fields hidden">
                 <div id="icloudStatus" class="hub-status" role="status" aria-live="polite"></div>
@@ -1793,6 +1843,7 @@
     <script src="modelAliasForm.js"></script>
     <script src="helpPopover.js"></script>
     <script src="syncContentForm.js"></script>
+    <script src="sshSyncForm.js"></script>
     <script src="../windowShortcut.js"></script>
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/subscriptionDisplay.js"></script>

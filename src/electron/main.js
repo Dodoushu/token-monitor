@@ -364,6 +364,9 @@ const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const { createIcloudSyncStore } = require('./icloudSync');
 const { createIcloudSyncRuntime } = require('./icloudSyncRuntime');
+const { normalizeSshConnection, normalizeSshConnections, normalizeSshIntervalMs, collectSshDevice, createSshSyncRuntime } = require('./sshSync');
+const { createSshSyncSettings } = require('./sshSyncSettings');
+const { createSshDeviceSnapshots } = require('./sshSyncStats');
 const {
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
@@ -498,7 +501,7 @@ const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
-const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
+const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud', 'ssh']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
 const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
@@ -657,6 +660,8 @@ function defaultSettings() {
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
     icloudWriterId: '',
+    sshConnections: [],
+    sshPollIntervalMs: 300000,
     lastPostedDeviceId: '',
     clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
     codexDotsEnabled: process.env.TOKEN_MONITOR_CODEX_LOCAL_USAGE === '1',
@@ -2719,6 +2724,8 @@ function readSettings() {
       merged.lastViewState = normalizeInitialRendererViewState(saved.lastViewState);
     }
     merged.hubMode = normalizeHubMode(merged.hubMode, 'local', process.platform);
+    merged.sshConnections = normalizeSshConnections(merged.sshConnections);
+    merged.sshPollIntervalMs = normalizeSshIntervalMs(merged.sshPollIntervalMs);
     merged.language = normalizeLanguageSetting(merged.language);
     merged.currency = normalizeCurrency(merged.currency);
     merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
@@ -3070,6 +3077,83 @@ function withHistoryPreview(stats, devices) {
 }
 
 let mode = 'idle';
+let sshRuntimeHandle = null;
+let sshStopPromise = Promise.resolve();
+let sshStopError = null;
+let sshSettingsService = null;
+const sshSnapshots = createSshDeviceSnapshots({
+  getConnections: () => settings?.sshConnections || [],
+  getIntervalMs: () => normalizeSshIntervalMs(settings?.sshPollIntervalMs)
+});
+
+function getSshSettingsService() {
+  if (!sshSettingsService) sshSettingsService = createSshSyncSettings({
+    getSettings: () => settings,
+    store: ensureCredentialStore(),
+    normalize: normalizeSshConnection,
+    collect: collectSshDevice,
+    commitConnections: (connections) => {
+      const previous = settings.sshConnections;
+      settings.sshConnections = connections;
+      try { saveSettings({ throwOnError: true }); }
+      catch (error) { settings.sshConnections = previous; throw error; }
+    }
+  });
+  return sshSettingsService;
+}
+
+function sshStatus() {
+  return sshRuntimeHandle?.getStatus() || { running: false, hosts: [], error: sshStopError, lastSuccessAt: null, lastAttemptAt: null };
+}
+
+function composeSshStats() {
+  const stats = sshSnapshots.stats(localDevice);
+  return withHistoryPreview(stats, sshSnapshots.records(localDevice));
+}
+
+function stopSshRuntime() {
+  const previous = sshRuntimeHandle;
+  sshRuntimeHandle = null;
+  if (previous) {
+    // stop() synchronously aborts the child before its first await. The quit
+    // path exits immediately, so queueing this call in then() is too late.
+    const stopping = previous.stop();
+    sshStopPromise = Promise.all([sshStopPromise, stopping]).then(() => undefined);
+  }
+  // Observe a rejected close barrier even while the mode lane is still busy.
+  // The rejected promise stays rejected, preventing replacement after an
+  // unconfirmed process termination.
+  sshStopPromise.catch((error) => { sshStopError = error.code || 'termination-unconfirmed'; });
+  return sshStopPromise;
+}
+
+async function startSshCollector() {
+  const generation = hubModeGeneration;
+  await stopSshRuntime();
+  if (generation !== hubModeGeneration || settings.hubMode !== 'ssh') return;
+  startLocalCollector();
+  mode = 'sync';
+  const current = () => generation === hubModeGeneration && settings.hubMode === 'ssh';
+  const runtime = createSshSyncRuntime({
+    connections: settings.sshConnections,
+    intervalMs: settings.sshPollIntervalMs,
+    getPassword: (id) => getSshSettingsService().password(id),
+    onRecord: (record, connection) => {
+      if (!current()) return;
+      sshSnapshots.accept(record, connection);
+      sendPush({ event: 'stats', data: { type: 'stats', reason: 'ssh', stats: {}, at: new Date().toISOString() } });
+    },
+    onStatus: (status) => {
+      if (current()) sendPush({ event: 'ssh-sync', data: { status } });
+    }
+  });
+  sshRuntimeHandle = runtime;
+  void runtime.start().catch(() => {
+    if (current()) recordDiagnosticEvent({ subsystem: 'ssh', code: 'ssh-start-failed' });
+  });
+  sendStatus(true, { provider: 'ssh', reason: 'ssh-polling' });
+}
+
 let deviceRuntimeHandle = null;
 let icloudRuntimeHandle = null;
 let icloudRuntimeEpoch = 0;
@@ -4718,6 +4802,7 @@ function historyResolverOptions() {
     embeddedHub,
     historyEnabled: settings?.historyEnabled !== false,
     hubMode: settings?.hubMode,
+    sshDevices: settings?.hubMode === 'ssh' ? sshSnapshots.records(localDevice) : null,
     hubUrl,
     icloudSync: settings?.hubMode === 'icloud' ? icloudRuntimeHandle : null,
     // In sync/host mode the headless agent owns this machine's producer while its
@@ -4926,6 +5011,10 @@ function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   let rendererPayload = payload;
   if (payload?.data?.stats) {
+    if (settings?.hubMode === 'ssh') {
+      payload.data.stats = composeSshStats();
+      updateDiscordRpcDisplay(payload.data.stats);
+    }
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
     // Client local batches overlay usage on the cached Hub snapshot; they do
@@ -5444,6 +5533,8 @@ function settingsForRenderer() {
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
+    sshConnections: getSshSettingsService().connections(),
+    sshSyncStatus: sshStatus(),
     syncContentStatus: getSyncContentRuntime().status(),
     locale: trayMenuLocale(),
     ...redactedCredentials,
@@ -6491,8 +6582,10 @@ function startMode() {
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
+  sshSettingsService?.cancelTest();
   edgeDockManualStats = null;
   const icloudStop = stopIcloudRuntime();
+  const sshStop = stopSshRuntime();
   // Tear down collectors synchronously so they can't double-run while the
   // async reconciliation below is queued. iCloud's filesystem teardown is
   // awaited by the mode lane before any replacement runtime is created.
@@ -6506,6 +6599,15 @@ function startMode() {
   // than racing — otherwise an in-flight start could finish with the old
   // port/secret after the UI already advertises the new ones.
   modeQueue = modeQueue.then(async () => {
+    try {
+      await sshStop;
+      await stopSshRuntime();
+    } catch (error) {
+      // An unconfirmed SSH exit prevents another SSH process, but an unrelated
+      // local/Hub/iCloud runtime can still collect without replacing that child.
+      if (settings.hubMode === 'ssh') throw error;
+      recordDiagnosticEvent({ subsystem: 'ssh', code: 'termination-unconfirmed' });
+    }
     await icloudStop;
     // A prior queued mode may have created an iCloud runtime after this call's
     // initial stop. Drain that runtime as well before applying the latest mode.
@@ -6531,6 +6633,10 @@ function startMode() {
       return;
     }
     await stopEmbeddedHub();
+    if (settings.hubMode === 'ssh') {
+      await startSshCollector();
+      return;
+    }
     if (settings.hubMode === 'icloud') {
       await startIcloudCollector();
       if (settings.hubMode === 'icloud') void reconcileSharedSubscriptions();
@@ -6572,6 +6678,11 @@ async function reconcileSharedSubscriptions() {
 }
 
 function restartDeviceRuntimeForMode() {
+  if (settings.hubMode === 'ssh') {
+    startLocalCollector();
+    mode = 'sync';
+    return;
+  }
   if (mode === 'local') {
     startLocalCollector();
     return;
@@ -6624,6 +6735,8 @@ function reconfigureUsageRuntimeForMode() {
 // stopLocalCollector() / stopSyncCollector() behaviour so the old watcher is
 // really gone before a new one starts on the same paths.
 function stopAll() {
+  sshSettingsService?.cancelTest();
+  void stopSshRuntime();
   stopPersistBoundsTimer();
   stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
@@ -6808,6 +6921,10 @@ async function fetchStats(options = {}) {
       forceSelfSync: Boolean(options?.forceSelfSync),
       onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)
     });
+  }
+  if (settings.hubMode === 'ssh') {
+    if (force && options?.forceUsage) await sshRuntimeHandle?.refresh();
+    return injectLocalDeviceStatus(composeSshStats());
   }
   if (mode === 'local') {
     if (localStats) return localStats;
@@ -7858,6 +7975,33 @@ app.whenReady().then(() => {
     }
   });
   applySyncSettingsPatch = applySettingsPatch;
+  const sshCommands = getSshSettingsService();
+  let sshSettingsLane = Promise.resolve();
+  function editSshConnections(edit) {
+    const operation = sshSettingsLane.then(async () => {
+      await stopSshRuntime();
+      try { edit(); }
+      finally { if (settings.hubMode === 'ssh') startMode(); }
+      pushSettingsToRenderer();
+      return { settings: settingsForRenderer(), status: sshStatus() };
+    });
+    sshSettingsLane = operation.catch(() => {});
+    return operation;
+  }
+  ipcMain.handle('sshSync:status', () => sshStatus());
+  ipcMain.handle('sshSync:saveConnection', (_event, options) => editSshConnections(() => sshCommands.save(options)));
+  ipcMain.handle('sshSync:removeConnection', (_event, id) => editSshConnections(() => sshCommands.remove(id)));
+  let sshTestInFlight = null;
+  ipcMain.handle('sshSync:testConnection', async (_event, options) => {
+    if (sshTestInFlight) throw new Error('An SSH connection test is already running');
+    sshTestInFlight = sshCommands.test(options);
+    try { return await sshTestInFlight; }
+    finally { sshTestInFlight = null; }
+  });
+  ipcMain.handle('sshSync:refresh', async () => {
+    await modeQueue;
+    return sshRuntimeHandle ? sshRuntimeHandle.refresh() : sshStatus();
+  });
   ipcMain.handle('syncContent:status', (_event, refresh = true) => refresh ? getSyncContentRuntime().refresh() : getSyncContentRuntime().status());
   ipcMain.handle('syncContent:preview', (_event, kind) => getSyncContentRuntime().preview(kind));
   ipcMain.handle('syncContent:configure', (_event, options) => getSyncContentRuntime().configure(options));
@@ -7933,6 +8077,9 @@ app.whenReady().then(() => {
     delete normalizedPatch.syncContentState;
     delete normalizedPatch.syncContentStatus;
     delete normalizedPatch.syncContentBase;
+    delete normalizedPatch.sshConnections;
+    delete normalizedPatch.sshSyncStatus;
+    delete normalizedPatch.sshPassword;
     // Account fields declared persist:'never' (managed account lists, profile
     // maps, workbuddy session fields) are stripped by the registry walk below.
     normalizeAccountPatch(patch, normalizedPatch);
@@ -7961,6 +8108,7 @@ app.whenReady().then(() => {
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
+    if (patch.sshPollIntervalMs !== undefined) normalizedPatch.sshPollIntervalMs = normalizeSshIntervalMs(patch.sshPollIntervalMs);
     if (patch.heatmapMetric !== undefined) normalizedPatch.heatmapMetric = normalizeHeatmapMetric(patch.heatmapMetric, settings.heatmapMetric);
     if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);
     if (patch.sessionContextMetric !== undefined) normalizedPatch.sessionContextMetric = normalizeSessionContextMetric(patch.sessionContextMetric, settings.sessionContextMetric);

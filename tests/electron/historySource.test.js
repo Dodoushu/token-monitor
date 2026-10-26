@@ -17,6 +17,19 @@ const aggregate = (devices) => ({
   summary: { totalTokens: devices.reduce((sum, device) => sum + device.tokens, 0) }
 });
 
+test('SSH history includes local and remote device records without a Hub request', async () => {
+  const options = {
+    mode: 'sync', hubMode: 'ssh', aggregateHistory: aggregate,
+    sshDevices: [{ deviceId: 'local', date: '2026-10-26', tokens: 10 }, { deviceId: 'ssh:dev', date: '2026-10-25', tokens: 20 }],
+    fetchImpl: () => { throw new Error('SSH history must not fetch a Hub'); }
+  };
+  assert.equal((await resolveCompleteHistory(options)).summary.totalTokens, 30);
+  const result = await resolveCompleteHistoryWithDevices(options);
+  assert.equal(result.history.summary.totalTokens, 30);
+  assert.deepEqual(result.deviceHistories.map((device) => device.deviceId), ['local', 'ssh:dev']);
+  assert.equal((await resolveCompleteHistory({ ...options, historyEnabled: false })).summary.totalTokens, 0);
+});
+
 test('returns the same empty history shape when history is disabled', async () => {
   assert.deepEqual(await resolveCompleteHistory({ historyEnabled: false, aggregateHistory: aggregate }), {
     daily: [], monthly: [], summary: { totalTokens: 0 }
